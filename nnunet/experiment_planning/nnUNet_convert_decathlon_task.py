@@ -18,6 +18,7 @@ from nnunet.utilities.file_endings import remove_trailing_slash
 
 
 def crawl_and_remove_hidden_from_decathlon(folder):
+    # 删除数据集文件中的隐藏文件
     folder = remove_trailing_slash(folder)
     assert folder.split('/')[-1].startswith("Task"), "This does not seem to be a decathlon folder. Please give me a " \
                                                      "folder that starts with TaskXX and has the subfolders imagesTr, " \

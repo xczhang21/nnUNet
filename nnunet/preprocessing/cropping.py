@@ -21,6 +21,11 @@ from collections import OrderedDict
 
 
 def create_nonzero_mask(data):
+    """
+    第一步根据四维图像数据data(C,X,Y,Z)生成三维的非零模板nonzero_mask，标示图像中哪些区域是非零的 。
+    不同的模态都有对应的三维数据，产生不同的三维nonzero_mask，而整个四维图像的非零模板为各个模态非零模板的并集。
+    最后调用scipy库的binary_fill_holes函数对生成的nonzero_mask进行填充。
+    """
     from scipy.ndimage import binary_fill_holes
     assert len(data.shape) == 4 or len(data.shape) == 3, "data must have shape (C, X, Y, Z) or shape (C, X, Y)"
     nonzero_mask = np.zeros(data.shape[1:], dtype=bool)
@@ -32,6 +37,9 @@ def create_nonzero_mask(data):
 
 
 def get_bbox_from_mask(mask, outside_value=0):
+    """
+    第二步根据生成的非零模板，确定用于裁剪的bounding_box大小和位置，在代码中就是要找到nonzero_mask在x，y，z三个坐标轴上值为1的最小坐标值以及最大坐标值。
+    """
     mask_voxel_coords = np.where(mask != outside_value)
     minzidx = int(np.min(mask_voxel_coords[0]))
     maxzidx = int(np.max(mask_voxel_coords[0])) + 1
@@ -92,6 +100,9 @@ def crop_to_nonzero(data, seg=None, nonzero_label=-1):
     nonzero_mask = create_nonzero_mask(data)
     bbox = get_bbox_from_mask(nonzero_mask, 0)
 
+    """
+    第三步就根据bounding_box对该张图像的每个模态依次进行裁剪，然后重新组合在一起。
+    """
     cropped_data = []
     for c in range(data.shape[0]):
         cropped = crop_to_bbox(data[c], bbox)
@@ -106,6 +117,12 @@ def crop_to_nonzero(data, seg=None, nonzero_label=-1):
         seg = np.vstack(cropped_seg)
 
     nonzero_mask = crop_to_bbox(nonzero_mask, bbox)[None]
+    """
+    注意到，nnUNet在对标注图像seg进行裁剪之后，还额外利用了nonzero_mask的信息，将nonzero_mask区域以外的背景标签值，从0修改为-1。
+    这样一来，seg中值为0和-1的都代表背景，只是值为0的代表图像中值不为0的背景，值为-1的代表图像中值为0的背景，这样做可在后续的处理中，
+    用seg<0迅速指示图像中nonzero region。
+    在normalization中，如果图像尺寸减少了1/4以上，就需要利用这些信息，仅在nonzero region进行normalization。
+    """
     if seg is not None:
         seg[(seg == 0) & (nonzero_mask == 0)] = nonzero_label
     else:
@@ -121,6 +138,8 @@ def get_patient_identifiers_from_cropped_files(folder):
 
 
 class ImageCropper(object):
+    # 这个类的功能是凭借mask裁剪原图，裁剪结果保存为npz格式，自己打算把npz文件恢复成nii.gz，
+    # 这个裁剪的结果是将.nii.gz的脑子个提取出来，把那没有颜色的3维像素点层给删除，也就是找个3维框，将脑子内切在里面
     def __init__(self, num_threads, output_folder=None):
         """
         This one finds a mask of nonzero elements (must be nonzero in all modalities) and crops the image to that mask.

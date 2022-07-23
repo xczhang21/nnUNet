@@ -64,6 +64,11 @@ class ExperimentPlanner(object):
         self.conv_per_stage = 2
 
     def get_target_spacing(self):
+        """
+        重采样的第一步是确定重采样的目标空间大小。在之前数据格式转换的时候，每个数据的spacing信息存储在对应的pickle文件中，
+        需要依次进行读取，然后存放在一个列表中spacings当中。之后调用numpy中函数统计每个维度spacing的中值即可。
+        """
+        # 如果目标间距非常各向异性，可能不希望对间距最差的轴进行下采样     
         spacings = self.dataset_properties['all_spacings']
 
         # target = np.median(np.vstack(spacings), 0)
@@ -143,6 +148,16 @@ class ExperimentPlanner(object):
 
     def get_properties_for_stage(self, current_spacing, original_spacing, original_shape, num_cases,
                                  num_modalities, num_classes):
+        """
+        input patch size的计算从数据集的new median shape(in voxels)开始。这与之前的实验相反，在之前的实验中，是基于median size in mm。
+        在这背后的基本原理是，对于某些感兴趣的器官，最有可能选择的acquisition方法是，视野和体素分辨率齐头并进，以向医生显示他们需要看到的内容。
+        对于某些 modalities with anisotropy(cine MRI) 这一假设可能将会被违背，但作者无法接受。
+        在未来的实验中，作者将尝试：
+        1) 基于input patch size 匹配输入size的纵横比(而不是体素)
+        2) 尝试强制我们在所有方向上看到相同的'distance'(尝试保持相同大小，以毫米为单位)
+
+        此处创建的patches 尝试保持 new median shape 的纵横比
+        """
         """
         Computation of input patch size starts out with the new median shape (in voxels) of a dataset. This is
         opposed to prior experiments where I based it on the median size in mm. The rationale behind this is that
@@ -255,6 +270,17 @@ class ExperimentPlanner(object):
         num_modalities = len(list(modalities.keys()))
 
         target_spacing = self.get_target_spacing()
+        # 不知到这样算出的new_shapes意义何在
+        # 这个new_shapes 和sizes 有什么区别，要有区别的前提是原始的spacing 和 target_spacing 不同
+        # 但是，这个 target_spacing 是一个中位数，如果数据集的spacing 都相同，则这个new_shape就和sizes没有区别
+        # 而且，感觉这个new_shapes 主要是靠各个数据的spacing 来确定的，而不是靠各个图像的size的中位数来确定，
+        # spacing 的重要性要比size 大？(已解决)
+
+        """
+        重采样的第二步:根据target_spacing确定每张图像的目标尺寸。每张图像，spacing和shape之间的乘积为一个定值，代表整个图像在实际空间中的大小。因此可以得到如下关系：
+        target shape * target spacing = original shape * original spacing
+        target shape = (original spacing/ target spacing) * original shape
+        """
         new_shapes = [np.array(i) / target_spacing * np.array(j) for i, j in zip(spacings, sizes)]
 
         max_spacing_axis = np.argmax(target_spacing)
@@ -262,6 +288,7 @@ class ExperimentPlanner(object):
         self.transpose_forward = [max_spacing_axis] + remaining_axes
         self.transpose_backward = [np.argwhere(np.array(self.transpose_forward) == i)[0][0] for i in range(3)]
 
+        # 下面开始考虑数据集中各个图片的shape了，求中、最大、最小
         # we base our calculations on the median shape of the datasets
         median_shape = np.median(np.vstack(new_shapes), 0)
         print("the median shape of the dataset is ", median_shape)
@@ -276,6 +303,7 @@ class ExperimentPlanner(object):
         # how many stages will the image pyramid have?
         self.plans_per_stage = list()
 
+        # 这是把spacing 最大的提到前面了
         target_spacing_transposed = np.array(target_spacing)[self.transpose_forward]
         median_shape_transposed = np.array(median_shape)[self.transpose_forward]
         print("the transposed median shape of the dataset is ", median_shape_transposed)
@@ -380,6 +408,8 @@ class ExperimentPlanner(object):
         return properties
 
     def determine_whether_to_use_mask_for_norm(self):
+        # 确认是否使用mask进行归一化
+        # 仅使用非零掩码对裁剪进行归一化，
         # only use the nonzero mask for normalization of the cropping based on it resulted in a decrease in
         # image size (this is an indication that the data is something like brats/isles and then we want to
         # normalize in the brain region only)
@@ -388,13 +418,16 @@ class ExperimentPlanner(object):
         use_nonzero_mask_for_norm = OrderedDict()
 
         for i in range(num_modalities):
+            # 先判断模式里是否有CT模式，如果有CT模式，就不“使用非零mask进行归一化”
             if "CT" in modalities[i]:
                 use_nonzero_mask_for_norm[i] = False
             else:
+                # 把所有croped后的减少的量存起来，不知道在后面有什么用？
                 all_size_reductions = []
                 for k in self.dataset_properties['size_reductions'].keys():
                     all_size_reductions.append(self.dataset_properties['size_reductions'][k])
 
+                # 计算croped后缩小成多少了，如果小于原来的3/4，就“使用非零mask进行归一化”，如果没缩到那么小。就不“使用非零mask进行归一化”
                 if np.median(all_size_reductions) < 3 / 4.:
                     print("using nonzero mask for normalization")
                     use_nonzero_mask_for_norm[i] = True
@@ -403,6 +436,8 @@ class ExperimentPlanner(object):
                     use_nonzero_mask_for_norm[i] = False
 
         for c in self.list_of_cropped_npz_files:
+            # 这是依每个case_identifier读取他的.pkl文件，然后将是否能“使用非零mask进行归一化”的bool值再存储到他的.pkl文件中
+            # 所有的.pkl中都存放的是相同的"use_nonzero_mask_for_norm",这个值的长度是"modalities"的长度，4
             case_identifier = get_case_identifier_from_npz(c)
             properties = self.load_properties_of_cropped(case_identifier)
             properties['use_nonzero_mask_for_norm'] = use_nonzero_mask_for_norm

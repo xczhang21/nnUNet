@@ -26,6 +26,11 @@ default_cascade_trainer = "nnUNetTrainerV2CascadeFullRes"
 PLEASE READ paths.md FOR INFORMATION TO HOW TO SET THIS UP
 """
 
+# 自己添加环境变量
+os.environ['nnUNet_raw_data_base'] = "/home/zhang/zxc/nnUNet/DATASET/nnFormer_raw/"
+os.environ['RESULTS_FOLDER'] = "/home/zhang/zxc/nnUNet/DATASET/nnFormer_trained_models/"
+os.environ['nnUNet_preprocessed'] = "/home/zhang/zxc/nnUNet/DATASET/nnFormer_preprocessed/"
+
 base = os.environ['nnUNet_raw_data_base'] if "nnUNet_raw_data_base" in os.environ.keys() else None
 preprocessing_output_dir = os.environ['nnUNet_preprocessed'] if "nnUNet_preprocessed" in os.environ.keys() else None
 network_training_output_dir_base = os.path.join(os.environ['RESULTS_FOLDER']) if "RESULTS_FOLDER" in os.environ.keys() else None

@@ -37,6 +37,16 @@ class ExperimentPlanner3D_v21(ExperimentPlanner):
 
     def get_target_spacing(self):
         """
+        重采样的第一步是确定重采样的目标空间大小。在之前数据格式转换的时候，每个数据的spacing信息存储在对应的pickle文件中，
+        需要依次进行读取，然后存放在一个列表中spacings当中。之后调用numpy中函数统计每个维度spacing的中值即可。
+        """
+        """
+        默认情况下，使用第50百分位=目标间距的中位数。间距越大，数据越小，因此训练速度越快，越容易。间距越小，数据越大，训练时间越长，难度越大
+
+        对于有些数据集，中位数不是个好的选择。这些数据集的spacing非常的anisotropic,(如 ACDC的spacing 是(10, 1.5, 1.5))
+        这些数据集仍有在低分辨率轴上的间距为5mm或6mm的示例。在此处选择中值将导致较差的 interpolation artifacts,这可能会严重影响性能（由于切片的数较少）
+        """
+        """
         per default we use the 50th percentile=median for the target spacing. Higher spacing results in smaller data
         and thus faster and easier training. Smaller spacing results in larger data and thus longer and harder training
 
@@ -48,14 +58,20 @@ class ExperimentPlanner3D_v21(ExperimentPlanner):
         spacings = self.dataset_properties['all_spacings']
         sizes = self.dataset_properties['all_sizes']
 
+        # 找出spacing三个方向分别的中位数（是中位数的原因是self.target_spacing_percentile = 50）,0 是方向，即纵向为一组来找中位数
         target = np.percentile(np.vstack(spacings), self.target_spacing_percentile, 0)
 
         # This should be used to determine the new median shape. The old implementation is not 100% correct.
         # Fixed in 2.4
         # sizes = [np.array(i) / target * np.array(j) for i, j in zip(spacings, sizes)]
 
+        # 还是一样，找出一组数据集croped后的图像的中位大小
         target_size = np.percentile(np.vstack(sizes), self.target_spacing_percentile, 0)
         target_size_mm = np.array(target) * np.array(target_size)
+        # 需要确定不同target spacing 可能有益的数据集。这些数据集有以下特征：
+        # 有一个方向的分辨率和其他方向的分辨率相比非常的低
+        # 低分辨率方向的体素比其他方向少得多
+        # （低分辨方向的size也reduced了）
         # we need to identify datasets for which a different target spacing could be beneficial. These datasets have
         # the following properties:
         # - one axis which much lower resolution than the others
@@ -66,12 +82,16 @@ class ExperimentPlanner3D_v21(ExperimentPlanner):
         other_spacings = [target[i] for i in other_axes]
         other_sizes = [target_size[i] for i in other_axes]
 
+        # 查看是不是有anisotropic的spacing和体素
+        # 从这里可以看出，体素与图像的size挂钩的
         has_aniso_spacing = target[worst_spacing_axis] > (self.anisotropy_threshold * max(other_spacings))
         has_aniso_voxels = target_size[worst_spacing_axis] * self.anisotropy_threshold < min(other_sizes)
+        # 进过检查发现，当前我跑的数据集没有出现spacing anisotropic和voxels anisotropic
         # we don't use the last one for now
         #median_size_in_mm = target[target_size_mm] * RESAMPLING_SEPARATE_Z_ANISOTROPY_THRESHOLD < max(target_size_mm)
 
         if has_aniso_spacing and has_aniso_voxels:
+            # 看他怎么处理这个问题的，我觉得这是我需要的！
             spacings_of_that_axis = np.vstack(spacings)[:, worst_spacing_axis]
             target_spacing_of_that_axis = np.percentile(spacings_of_that_axis, 10)
             # don't let the spacing of that axis get higher than the other axes
@@ -109,6 +129,8 @@ class ExperimentPlanner3D_v21(ExperimentPlanner):
         # clip it to the median shape of the dataset because patches larger then that make not much sense
         input_patch_size = [min(i, j) for i, j in zip(input_patch_size, new_median_shape)]
 
+        # 输入当前的spacing和input_patch_size来获得
+        # 每个轴向的池化数，池化操作的kernel sizes, 卷积kernel sizes,新的shape，
         network_num_pool_per_axis, pool_op_kernel_sizes, conv_kernel_sizes, new_shp, \
         shape_must_be_divisible_by = get_pool_and_conv_props(current_spacing, input_patch_size,
                                                              self.unet_featuremap_min_edge_length,

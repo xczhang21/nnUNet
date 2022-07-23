@@ -134,10 +134,15 @@ def main():
         #lists, modalities = create_lists_from_splitted_dataset(splitted_4d_output_dir_task)
 
         # we need to figure out if we need the intensity propoerties. We collect them only if one of the modalities is CT
+        # 什么时候将dataset.json 创建在cropped_out_dir中的。已经知道了
+        # 从数据集配套的dataset.json文件中提取出数据类型，判断是不是CT类型，如果是CT类型会做 intensity propoerties 操作
         dataset_json = load_json(join(cropped_out_dir, 'dataset.json'))
         modalities = list(dataset_json["modality"].values())
         collect_intensityproperties = True if (("CT" in modalities) or ("ct" in modalities)) else False
+        # 实例化一个DatasetAnalyzer类，这个类的目的是获取cropped_out_dir文件中所的properties,获取的途径是各个npz对应的pkl和
+        # dataset.json文件
         dataset_analyzer = DatasetAnalyzer(cropped_out_dir, overwrite=False, num_processes=tf)  # this class creates the fingerprint
+        # 这将写入ExperimentPlanner使用的输出文件，这个文件就是各个croped 的npz同文件夹下的dataset_properties.pkl
         _ = dataset_analyzer.analyze_dataset(collect_intensityproperties)  # this will write output files that will be used by the ExperimentPlanner
 
 

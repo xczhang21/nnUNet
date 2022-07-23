@@ -210,6 +210,7 @@ class GenericPreprocessor(object):
         self.normalization_scheme_per_modality = normalization_scheme_per_modality
         self.use_nonzero_mask = use_nonzero_mask
 
+        # 确定用于低分辨率轴进行重采样的阈值
         self.resample_separate_z_anisotropy_threshold = RESAMPLING_SEPARATE_Z_ANISO_THRESHOLD
         self.resample_order_data = 3
         self.resample_order_seg = 1
@@ -224,6 +225,23 @@ class GenericPreprocessor(object):
         return data, seg, properties
 
     def resample_and_normalize(self, data, target_spacing, properties, seg=None, force_separate_z=None):
+        """
+        重采样是解决在一些三维医学图像数据中，不同的图像中单个体素voxel所代表的实际空间大小spacing不一致的问题。因为卷积神经网络只在体素空间中进行操作，
+        会忽视掉实际物理空间中大小信息。为避免这种差异性，需要不同图像数据在体素空间进行resize，保证不同的图像数据中，每个体素所代表的实际物理空间一致。
+        """
+        """
+        对图像进行标准化normalization的预处理，不仅在医学图像中需要，在自然图像中也是必备步骤。Normalization的目的是让训练集中每张图像的灰度值都能
+        具有相同的分布。
+        nnUnet提供两种normalization的策略，一种单独针对CT图像，一种应用于其他非CT图像。相同的地方是都使用z-scoring(即减去均值除以标准差)。不同的
+        地方有两点。第一点，CT图像做normalization用的是整个训练集前景的均值和标准差，而非CT图像normalization时仅使用单张图像的灰度信息均值和方差。
+        策略不同原因在于，CT图像中，强度信息HU值能反应不同组织的物理性质，用整个训练集前景的统计信息，可以有效的利用HU值的额外信息。第二点，CT图像中
+        经常会有异常大的孤立值和异常小的孤立值，需要先将图像HU值clip到前景HU值[0.5, 99.5]百分比范围之间，而非CT图像没有clip的必要。
+
+        值得注意的一点是，如果在crop阶段图像大小减少了1/4以上的时候，nnUnet会选择仅在nonzero region进行normalization。
+
+        CT图像的normalization过程需要两步。
+
+        """
         """
         data and seg must already have been transposed by transpose_forward. properties are the un-transposed values
         (spacing etc)
@@ -271,6 +289,18 @@ class GenericPreprocessor(object):
                                                         " has modalities"
 
         for c in range(len(data)):
+            """
+            CT图像的normalization的第一步：收集整个CT影像训练集前景的统计信息。假设c代表所有的模态，data[c]代表CT图像的三维数据。seg是存放
+            分割标注信息的三维数组，根据crop步骤中的处理，标注值为-1代表0值背景，标注值为0代表非0值的背景，而大于0代表不同的前景标签。nnUNet
+            为了简便计算，对每张图像仅采用1/10的前景体素用于统计，存放在voxels列表中。
+            mask = seg > 0 # 生成前景mask
+            voxels = list(data[c][mask][::10])
+
+            通过对训练集中每张训练数据的遍历，将采样到的前景体素列表voxels拼接在一块，可以命名为voxels_all。
+
+            CT图像的normalization的第二步：调用numpy中的函数统计整个训练集前景的均值，标准差，0.5%分位HU值，99.5%分位HU值，并利用这些统计
+            信息对每张图像进行clip和z-scoring。代码中use_nonzero_mask指示是否只在nonzero区域进行normalization.
+            """
             scheme = self.normalization_scheme_per_modality[c]
             if scheme == "CT":
                 # clip to lb and ub from train data foreground and use foreground mn and sd from training data
@@ -299,6 +329,9 @@ class GenericPreprocessor(object):
                 print('no intensity normalization')
                 pass
             else:
+                """
+                而非CT图像的normalization相对简单一些，只需1步，每张三维图像只利用自身均值和标准差进行z-scoring即可。
+                """
                 if use_nonzero_mask[c]:
                     mask = seg[-1] >= 0
                     data[c][mask] = (data[c][mask] - data[c][mask].mean()) / (data[c][mask].std() + 1e-8)
