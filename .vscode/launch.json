@@ -1,0 +1,62 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "nnUNet_convert_decathlon_task",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "-i", 
+                "/home/zhang/zxc/nnUNet/DATASET/nnUNet_raw/nnUNet_raw_data/Task01_WTBrainSegmentation"
+            ]
+        },
+        {
+            "name": "nnUNet_plan_and_preprocess",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "-t", "1",
+            ]
+        },
+        {
+            "name": "run_training",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "3d_fullres",
+                "nnUNetTrainerV2",
+                "1",
+                "0"
+            ]
+        },
+        {
+            "name": "predict_simple",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "-i", "/home/zhang/zxc/nnUNet/DATASET/nnUNet_raw/nnUNet_raw_data/Task001_WTBrainSegmentation/imagesTs", 
+                "-o", "/home/zhang/zxc/nnUNet/DATASET/nnUNet_raw/nnUNet_raw_data/Task001_WTBrainSegmentation/inferTs/",
+                "-m", "3d_fullres",
+                "-t", "1",
+                "-f", "0",
+                "-chk", "model_best",
+                "-tr", "nnUNetTrainerV2"
+            ]
+        }
+    ]
+}
