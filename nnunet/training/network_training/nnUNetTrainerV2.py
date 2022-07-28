@@ -67,9 +67,11 @@ class nnUNetTrainerV2(nnUNetTrainer):
 
             if force_load_plans or (self.plans is None):
                 self.load_plans_file()
-
+            
+            # process_planns(self.plans) 将experiment planner(实验计划)中的一些存储在nnUNetPlansv2.1_plans_3D.pkl
+            # 中的一些参数
             self.process_plans(self.plans)
-
+            # setup_DA_params()用来设置一些参数
             self.setup_DA_params()
 
             ################# Here we wrap the loss for deep supervision ############
@@ -86,6 +88,10 @@ class nnUNetTrainerV2(nnUNetTrainer):
             weights = weights / weights.sum()
             self.ds_loss_weights = weights
             # now wrap the loss
+            """
+            这个损失函数比较特殊，因为每次下采样后图像的像素会变小，这个损失函数的功能是根据不同的分辨率，分配不同损失函数的权值，
+            这使得更高的分辨率输出在损失中有更多的权值
+            """
             self.loss = MultipleOutputLoss2(self.loss, self.ds_loss_weights)
             ################# END ###################
 
@@ -102,6 +108,7 @@ class nnUNetTrainerV2(nnUNetTrainer):
                         "INFO: Not unpacking data! Training may be slow due to that. Pray you are not using 2d or you "
                         "will wait all winter for your model to finish!")
 
+                # 进行一些数据增强，获得tr_gen和val_gen
                 self.tr_gen, self.val_gen = get_moreDA_augmentation(
                     self.dl_tr, self.dl_val,
                     self.data_aug_params[
@@ -148,7 +155,18 @@ class nnUNetTrainerV2(nnUNetTrainer):
             norm_op = nn.InstanceNorm2d
 
         norm_op_kwargs = {'eps': 1e-5, 'affine': True}
+        """
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
+        """
         dropout_op_kwargs = {'p': 0, 'inplace': True}
+        """
+        p (float, optional): probability of an element to be zero-ed.
+        inplace (bool, optional): If set to ``True``, will do this operation
+            in-place
+        """
         net_nonlin = nn.LeakyReLU
         net_nonlin_kwargs = {'negative_slope': 1e-2, 'inplace': True}
         self.network = Generic_UNet(self.num_input_channels, self.base_num_features, self.num_classes,
@@ -235,6 +253,11 @@ class nnUNetTrainerV2(nnUNetTrainer):
 
         data = maybe_to_torch(data)
         target = maybe_to_torch(target)
+        """
+        这儿有个问题，data.shape 是 torch.Size([2, 1, 128, 160, 120])，len(target) 是 5，其中target[0].shape 是
+        torch.Size([2, 1, 128, 160, 112])，这里的len(target)=5 是怎么来的，现在正在跑的数据集的10分类，按我理解应该
+        len(target)=10啊，为啥等于5
+        """
 
         if torch.cuda.is_available():
             data = to_cuda(data)

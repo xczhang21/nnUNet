@@ -415,6 +415,7 @@ class NetworkTrainer(object):
         if not torch.cuda.is_available():
             self.print_to_log_file("WARNING!!! You are attempting to run training on a CPU (torch.cuda.is_available() is False). This can be VERY slow!")
 
+        # 下面的这两行应该是执行数据增强和转换的一系列操作
         _ = self.tr_gen.next()
         _ = self.val_gen.next()
 

@@ -55,6 +55,7 @@ def get_moreDA_augmentation(dataloader_train, dataloader_val, patch_size, params
         tr_transforms.append(SegChannelSelectionTransform(params.get("selected_seg_channels")))
 
     # don't do color augmentations while in 2d mode with 3d data because the color channel is overloaded!!
+    # 在2d模式下使用3d数据时不要进行颜色增强，因为颜色通道已超载
     if params.get("dummy_2D") is not None and params.get("dummy_2D"):
         ignore_axes = (0,)
         tr_transforms.append(Convert3DTo2DTransform())
@@ -62,7 +63,9 @@ def get_moreDA_augmentation(dataloader_train, dataloader_val, patch_size, params
     else:
         patch_size_spatial = patch_size
         ignore_axes = None
-
+    """
+    下面的SpatialTransform是集成了各种数据转换的方法
+    """
     tr_transforms.append(SpatialTransform(
         patch_size_spatial, patch_center_dist_from_border=None,
         do_elastic_deform=params.get("do_elastic"), alpha=params.get("elastic_deform_alpha"),

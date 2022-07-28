@@ -108,6 +108,11 @@ def resample_patient(data, seg, original_spacing, target_spacing, order_data=3, 
 
 def resample_data_or_seg(data, new_shape, is_seg, axis=None, order=3, do_separate_z=False, order_z=0):
     """
+    重采样第三步，调用skimage库中的reisze函数对每张图像进行reszie即可，但在nnUNet中会对根据图像是否存在各向异性进行不同的resize策略。
+    如果不存在各向异性，对整个三维图像进行3阶spline插值即可。如果图像存在各向异性，设spacing大的维度为z轴，则仅在图像的xy平面进行3阶spline
+    插值，而在z轴采用最近邻插值。而对分割的标注图像，无论各异性与否，在三个维度都采用最近邻插值。
+    """
+    """
     separate_z=True will resample with order 0 along z
     :param data:
     :param new_shape:
@@ -131,6 +136,9 @@ def resample_data_or_seg(data, new_shape, is_seg, axis=None, order=3, do_separat
     new_shape = np.array(new_shape)
     if np.any(shape != new_shape):
         data = data.astype(float)
+        """
+        下面代码中，用do_seperate_z表示是否存在各向异性，用axis表示各向异性图像中spacing最大的最大轴。
+        """
         if do_separate_z:
             print("separate z, order in z is", order_z, "order inplane is", order)
             assert len(axis) == 1, "only one anisotropic axis supported"
