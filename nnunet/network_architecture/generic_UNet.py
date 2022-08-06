@@ -128,6 +128,7 @@ class StackedConvLayers(nn.Module):
             self.conv_kwargs_first_conv = conv_kwargs
 
         super(StackedConvLayers, self).__init__()
+        # 从nn.Sequential()的定义来看，输入要么是orderdict，要么是一系列模型，遇到list,必须用*号进行转化，否则会报错 TypeError:list is not a Module subclass
         self.blocks = nn.Sequential(
             *([basic_block(input_feature_channels, output_feature_channels, self.conv_op,
                            self.conv_kwargs_first_conv,

@@ -109,6 +109,9 @@ class nnUNetTrainerV2(nnUNetTrainer):
                         "will wait all winter for your model to finish!")
 
                 # 进行一些数据增强，获得tr_gen和val_gen
+                """
+                在这儿增加了一个deep_supervision_scales深度监督尺度，一共是5层
+                """
                 self.tr_gen, self.val_gen = get_moreDA_augmentation(
                     self.dl_tr, self.dl_val,
                     self.data_aug_params[
@@ -257,6 +260,14 @@ class nnUNetTrainerV2(nnUNetTrainer):
         这儿有个问题，data.shape 是 torch.Size([2, 1, 128, 160, 120])，len(target) 是 5，其中target[0].shape 是
         torch.Size([2, 1, 128, 160, 112])，这里的len(target)=5 是怎么来的，现在正在跑的数据集的10分类，按我理解应该
         len(target)=10啊，为啥等于5
+        target[0].shape 是 [2, 1, 128, 160, 112]
+        target[1].shape 是 [2, 1, 64, 80, 56]
+        target[2].shape 是 [2, 1, 32, 40, 28]
+        target[3].shape 是 [2, 1, 16, 20, 14]
+        target[4].shape 是 [2, 1, 8, 10, 7]
+        (以解决)
+        
+        是为了实现深度监督 deep supervision
         """
 
         if torch.cuda.is_available():
@@ -266,6 +277,34 @@ class nnUNetTrainerV2(nnUNetTrainer):
         self.optimizer.zero_grad()
 
         if self.fp16:
+            """
+            AMP(自动混合精度)，该方法在训练网络时将单精度(FP32)与半精度(FP16)结合在一起，并使用相同的超参实现了与FP32几乎
+            相同的精度。
+            FP16的优势有三个:
+            1. 减少显存占用
+            2. 加快训练和推断的计算，能带来多一倍速的体验
+            3. 张量核心的普及(NVIDIA TensorCore)，低精度计算是未来深度学习的一个重要趋势。
+            存在的问题：
+            1. 溢出错误：由于FP16的动态范围比FP32位的狭窄很多，因此，在计算过程中很容易出现上溢出和下溢出，溢出后就会出现"NaN"
+            的问题。在深度学习中，由于激活函数的梯度往往要比权重梯度小，更易出现下溢出的情况
+            2. 舍入误差：舍入误差指的是当梯度过小时，小于当前区间的最小间隔时，该次梯度更新可能会失败
+            为了消除torch.HalfTensor也就是FP16的问题，需要使用以下两种方法：
+            1. 混合精度训练
+                在内存中用FP16做储存和乘法从而加速计算，而用FP32做累加避免舍入误差。混合精度训练的策略有效地缓解了舍入误差的问题
+                什么时候用torch.FloatTensor,什么时候用torch.HalfTensor呢? 这是由pytorch框架决定的，在pytorch1.6的AMP上
+                下文中，部分操作(conv1d, conv2d, conv3d,...)中Tensor会被自动转化为半精度浮点型torch.HalfTensor
+            2. 损失放大 (Loss scaling)
+                即使使用了混合进度训练，还是存在无法收敛的情况，原因是激活梯度的值太小，造成了溢出。可以通过使用torch.cuda.amp.GradScaler,
+                通过放大loss的值来防止梯度的underflow (只在BP时传递梯度信息使用，真正更新权重时还是要把放大的梯度再unscale回去)
+                反向传播前，将损失变化手动增加2^k倍，因此反向传播是得到的中间变量(激活函数梯度)则不会溢出
+                反向传播后，将权重梯度缩小2^k倍，恢复正常值
+            使用AMP
+            pytorch1.6及以上版本有连个接口autocast和Gradscaler
+                当进入autocast上下文后，在这之后的cuda ops会把tensor的数据类型转换为半精度浮点数，从而在不损失训练精度的情况下
+                加速运算。
+                不过，autocast上下文只能包含网络的前向传播(包括loss的计算)，不能包含反向传播，因为BP的op会使用前向op相同的类型。
+            对于分布式训练，由于autocast是thread local的，需要用autocast装饰model的forward函数
+            """
             with autocast():
                 output = self.network(data)
                 del data
